@@ -14,16 +14,24 @@ import signal
 import sys
 import threading
 from dataclasses import dataclass
-from typing import Optional, Sequence
+from typing import Optional, Sequence, cast
 
 import numpy as np
-import pexpect
 import sounddevice as sd
 import soundfile as sf
 from dotenv import load_dotenv
 from openai import AuthenticationError, OpenAI
 from rich.console import Console
 from rich.prompt import Prompt
+
+if os.name == "nt":
+    try:
+        from winpty import PtyProcess, WinptyError
+    except ImportError:  # pragma: no cover - handled at runtime
+        PtyProcess = None  # type: ignore[assignment]
+        WinptyError = Exception  # type: ignore[assignment]
+else:
+    import pexpect
 
 
 console = Console()
@@ -99,7 +107,7 @@ class CodexBridge:
     """Wrapper around an interactive `codex` CLI using a pseudo-terminal."""
 
     command: Sequence[str]
-    process: Optional[pexpect.spawnbase.SpawnBase] = None
+    process: Optional[object] = None
     _stdout_thread: Optional[threading.Thread] = None
 
     def start(self) -> None:
@@ -107,8 +115,15 @@ class CodexBridge:
         if not self.command:
             raise FileNotFoundError("No command provided")
 
-        executable, *args = self.command
-        try:
+        if os.name == "nt":
+            if PtyProcess is None:  # pragma: no cover - runtime guard
+                raise RuntimeError(
+                    "pywinpty (winpty) is required on Windows. "
+                    "Install it via `pip install pywinpty`."
+                )
+            self.process = PtyProcess.spawn(list(self.command))
+        else:
+            executable, *args = self.command
             self.process = pexpect.spawn(
                 executable,
                 args=args,
@@ -116,8 +131,6 @@ class CodexBridge:
                 codec_errors="ignore",
                 echo=False,
             )
-        except FileNotFoundError:
-            raise
 
         self._stdout_thread = threading.Thread(
             target=self._pump_stdout, name="codex-stdout", daemon=True
@@ -126,32 +139,70 @@ class CodexBridge:
 
     def _pump_stdout(self) -> None:
         assert self.process is not None
-        while True:
-            try:
-                line = self.process.readline()
-            except pexpect.EOF:
-                break
-            except pexpect.TIMEOUT:
-                continue
-            if line:
+
+        if os.name == "nt":
+            proc = cast("PtyProcess", self.process)
+            while True:
+                try:
+                    line = proc.readline()
+                except EOFError:
+                    break
+                if not line:
+                    continue
+                if isinstance(line, bytes):
+                    line = line.decode("utf-8", errors="ignore")
                 console.print(line.rstrip("\r\n"), markup=False, highlight=False)
+        else:
+            proc = cast("pexpect.spawnbase.SpawnBase", self.process)
+            while True:
+                try:
+                    line = proc.readline()
+                except pexpect.EOF:
+                    break
+                except pexpect.TIMEOUT:
+                    continue
+                if line:
+                    console.print(line.rstrip("\r\n"), markup=False, highlight=False)
+
         console.print("[magenta]Codex session ended.[/magenta]")
 
     def send_line(self, text: str) -> None:
-        if not self.process or not self.process.isalive():
+        if not self.process:
             raise RuntimeError("Codex process is not running")
-        try:
-            self.process.sendline(text)
-        except (pexpect.ExceptionPexpect, OSError) as exc:
-            console.print(f"[red]Failed to send input to Codex: {exc}[/red]")
+
+        if os.name == "nt":
+            proc = cast("PtyProcess", self.process)
+            if not proc.isalive():
+                raise RuntimeError("Codex process is not running")
+            try:
+                proc.write(text + "\r\n")
+            except WinptyError as exc:
+                console.print(f"[red]Failed to send input to Codex: {exc}[/red]")
+        else:
+            proc = cast("pexpect.spawnbase.SpawnBase", self.process)
+            if not proc.isalive():
+                raise RuntimeError("Codex process is not running")
+            try:
+                proc.sendline(text)
+            except (pexpect.ExceptionPexpect, OSError) as exc:
+                console.print(f"[red]Failed to send input to Codex: {exc}[/red]")
 
     def terminate(self) -> None:
-        if self.process is None:
+        if not self.process:
             return
-        try:
-            self.process.terminate(force=True)
-        except pexpect.ExceptionPexpect:
-            pass
+
+        if os.name == "nt":
+            proc = cast("PtyProcess", self.process)
+            try:
+                proc.terminate(force=True)
+            except WinptyError:
+                pass
+        else:
+            proc = cast("pexpect.spawnbase.SpawnBase", self.process)
+            try:
+                proc.terminate(force=True)
+            except pexpect.ExceptionPexpect:
+                pass
 
 
 def interactive_loop(
