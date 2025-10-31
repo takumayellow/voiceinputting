@@ -1,0 +1,6 @@
+openai>=1.35.12
+python-dotenv>=1.0.1
+sounddevice>=0.4.7
+soundfile>=0.12.1
+numpy>=1.26.4
+rich>=13.7.1
