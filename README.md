@@ -39,6 +39,7 @@ python -m src.voice_to_codex
 - テキストを直接入力すると、そのまま Codex に送信.
 - `--auto-send` で確認を省略, `--duration` で録音秒数を変更.
 - `--codex-cmd -- codex --model o3` のように指定すると、Codex の起動オプションをカスタマイズ可能.
+- Codex CLI が PATH に無い場合は `--codex-cmd "C:\Users\<you>\.vscode\extensions\...\codex.exe"` のようにフルパスを指定するか、PowerShell で `$env:Path += ";<codex.exe のあるフォルダ>"` を実行してから起動してください。
 
 ### VS Code からの利用例
 1. VS Code のターミナルで仮想環境を有効化

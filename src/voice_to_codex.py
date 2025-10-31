@@ -11,13 +11,13 @@ import argparse
 import io
 import os
 import signal
-import subprocess
 import sys
 import threading
 from dataclasses import dataclass
 from typing import Optional, Sequence
 
 import numpy as np
+import pexpect
 import sounddevice as sd
 import soundfile as sf
 from dotenv import load_dotenv
@@ -96,21 +96,29 @@ def transcribe_audio(
 
 @dataclass
 class CodexBridge:
-    """Wrapper around an interactive `codex` subprocess."""
+    """Wrapper around an interactive `codex` CLI using a pseudo-terminal."""
 
     command: Sequence[str]
-    process: Optional[subprocess.Popen] = None
+    process: Optional[pexpect.spawnbase.SpawnBase] = None
     _stdout_thread: Optional[threading.Thread] = None
 
     def start(self) -> None:
-        self.process = subprocess.Popen(
-            self.command,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-        )
+        """Launch Codex within a PTY so it thinks it is connected to a terminal."""
+        if not self.command:
+            raise FileNotFoundError("No command provided")
+
+        executable, *args = self.command
+        try:
+            self.process = pexpect.spawn(
+                executable,
+                args=args,
+                encoding="utf-8",
+                codec_errors="ignore",
+                echo=False,
+            )
+        except FileNotFoundError:
+            raise
+
         self._stdout_thread = threading.Thread(
             target=self._pump_stdout, name="codex-stdout", daemon=True
         )
@@ -118,27 +126,32 @@ class CodexBridge:
 
     def _pump_stdout(self) -> None:
         assert self.process is not None
-        assert self.process.stdout is not None
-        for line in self.process.stdout:
-            console.print(line.rstrip("\n"))
+        while True:
+            try:
+                line = self.process.readline()
+            except pexpect.EOF:
+                break
+            except pexpect.TIMEOUT:
+                continue
+            if line:
+                console.print(line.rstrip("\r\n"), markup=False, highlight=False)
         console.print("[magenta]Codex session ended.[/magenta]")
 
     def send_line(self, text: str) -> None:
-        if not self.process or not self.process.stdin:
+        if not self.process or not self.process.isalive():
             raise RuntimeError("Codex process is not running")
         try:
-            self.process.stdin.write(text + os.linesep)
-            self.process.stdin.flush()
-        except BrokenPipeError:
-            console.print("[red]Codex process is no longer accepting input.[/red]")
+            self.process.sendline(text)
+        except (pexpect.ExceptionPexpect, OSError) as exc:
+            console.print(f"[red]Failed to send input to Codex: {exc}[/red]")
 
     def terminate(self) -> None:
-        if self.process and self.process.poll() is None:
-            self.process.terminate()
-            try:
-                self.process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                self.process.kill()
+        if self.process is None:
+            return
+        try:
+            self.process.terminate(force=True)
+        except pexpect.ExceptionPexpect:
+            pass
 
 
 def interactive_loop(
