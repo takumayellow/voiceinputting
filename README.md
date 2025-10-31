@@ -69,5 +69,12 @@ python -m src.voice_to_codex
 - VS Code の `tasks.json` や拡張機能経由でのキーバインド
 - 音声 → Codex → 音声応答 (Text-to-Speech) まで含めた完全な対話
 
+## 現状の制約と残作業
+- **Windows ネイティブ CLI** は `stdout is not a terminal` で終了するため、WSL2 上で Codex を動かす前提を整える必要があります。
+- スクリプト側で `--codex-cmd wsl -e codex` など WSL 経由の起動を自動化する処理を追加する。
+- OpenAI API エラーやネットワーク断に対するリトライ／リカバリ処理を強化する。
+- GitHub リモートを作成し、`git push -u origin main` で進捗を共有する。
+- 使い方や制約の英語版ドキュメント、ライセンスの整備。
+
 ## ライセンス
 現時点では未指定。公開する場合は用途に合わせて `LICENSE` を追加してください。
