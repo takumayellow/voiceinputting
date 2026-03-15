@@ -1,5 +1,7 @@
 # Codex Voice Input Bridge
 
+![CI](https://github.com/takumayellow/voiceinputting/actions/workflows/ci.yml/badge.svg)
+
 このリポジトリは、Codex 5 CLI (VS Code からの利用を含む) に音声入力ワークフローを追加する試験実装です。Codex CLI 自体には公式な音声入力機能がないため、マイクから録音した音声を OpenAI の音声認識 API で文字起こしし、その結果を `codex` の対話セッションへ転送します。
 
 ## 機能概要
